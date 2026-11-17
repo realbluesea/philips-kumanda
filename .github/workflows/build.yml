@@ -78,11 +78,17 @@ jobs:
           package com.example.philipsremote
 
           import android.content.Context
+          import android.graphics.Color
+          import android.graphics.Typeface
+          import android.graphics.drawable.GradientDrawable
           import android.hardware.ConsumerIrManager
           import android.os.Bundle
           import android.os.VibrationEffect
           import android.os.Vibrator
-          import android.view.Gravity
+          import android.text.SpannableString
+          import android.text.Spanned
+          import android.text.style.RelativeSizeSpan
+          import android.view.*
           import android.widget.*
           import androidx.appcompat.app.AppCompatActivity
 
@@ -95,12 +101,12 @@ jobs:
               private val T = 444
               private fun rc6(cmd: Int): IntArray {
                   val h = ArrayList<Boolean>()
-                  repeat(6) { h.add(true) }; repeat(2) { h.add(false) } // leader
-                  h.add(true); h.add(false) // start biti
-                  repeat(3) { h.add(false); h.add(true) } // mod 000
+                  repeat(6) { h.add(true) }; repeat(2) { h.add(false) }
+                  h.add(true); h.add(false)
+                  repeat(3) { h.add(false); h.add(true) }
                   if (toggle == 0) { h.addAll(listOf(false, false, true, true)) }
-                  else { h.addAll(listOf(true, true, false, false)) } // toggle biti (2T)
-                  val bits = (0 shl 8) or cmd // adres 0 + komut
+                  else { h.addAll(listOf(true, true, false, false)) }
+                  val bits = (0 shl 8) or cmd
                   for (i in 15 downTo 0) {
                       if ((bits shr i) and 1 == 1) { h.add(true); h.add(false) }
                       else { h.add(false); h.add(true) }
@@ -123,37 +129,152 @@ jobs:
                       .vibrate(VibrationEffect.createOneShot(25, VibrationEffect.DEFAULT_AMPLITUDE))
               }
 
+              private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+              private fun lp(w: Int, h: Int, m: Int = 6): LinearLayout.LayoutParams {
+                  val p = LinearLayout.LayoutParams(dp(w), dp(h))
+                  p.setMargins(dp(m), dp(m), dp(m), dp(m))
+                  return p
+              }
+
+              private fun key(label: CharSequence, code: Int, color: Int, size: Float = 18f): TextView {
+                  val b = TextView(this)
+                  b.text = label
+                  b.gravity = Gravity.CENTER
+                  b.setTextColor(Color.WHITE)
+                  b.textSize = size
+                  b.typeface = Typeface.DEFAULT_BOLD
+                  val bg = GradientDrawable()
+                  bg.setColor(color)
+                  bg.cornerRadius = dp(40).toFloat()
+                  b.background = bg
+                  b.layoutParams = lp(64, 64)
+                  b.setOnTouchListener { v, e ->
+                      when (e.action) {
+                          MotionEvent.ACTION_DOWN -> {
+                              v.animate().scaleX(0.9f).scaleY(0.9f).setDuration(60).start()
+                              send(code)
+                          }
+                          MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+                              v.animate().scaleX(1f).scaleY(1f).setDuration(60).start()
+                      }
+                      true
+                  }
+                  return b
+              }
+
+              private fun sp(): View {
+                  val s = Space(this)
+                  s.layoutParams = lp(64, 64)
+                  return s
+              }
+
+              private fun pill(title: String, plus: Int, minus: Int): LinearLayout {
+                  val p = LinearLayout(this)
+                  p.orientation = LinearLayout.VERTICAL
+                  p.gravity = Gravity.CENTER
+                  val bg = GradientDrawable()
+                  bg.setColor(0xFF2A2D36.toInt())
+                  bg.cornerRadius = dp(40).toFloat()
+                  p.background = bg
+                  p.addView(key("+", plus, Color.TRANSPARENT, 26f), lp(64, 56, 2))
+                  val t = TextView(this)
+                  t.text = title
+                  t.textSize = 11f
+                  t.setTextColor(0xFF9AA0AC.toInt())
+                  t.gravity = Gravity.CENTER
+                  p.addView(t, LinearLayout.LayoutParams(
+                      LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+                  p.addView(key("−", minus, Color.TRANSPARENT, 26f), lp(64, 56, 2))
+                  val l = LinearLayout.LayoutParams(
+                      LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                  l.setMargins(dp(24), 0, dp(24), 0)
+                  p.layoutParams = l
+                  return p
+              }
+
+              private fun two(sym: String, name: String): CharSequence {
+                  val t = SpannableString(sym + "\n" + name)
+                  t.setSpan(RelativeSizeSpan(1.8f), 0, sym.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                  return t
+              }
+
+              private fun mk(label: CharSequence, code: Int): TextView {
+                  val k = key(label, code, 0xFF2A2D36.toInt(), 8f)
+                  k.layoutParams = lp(56, 56, 2)
+                  return k
+              }
+
+              private fun hrow(vararg v: View): LinearLayout {
+                  val r = LinearLayout(this)
+                  r.orientation = LinearLayout.HORIZONTAL
+                  r.gravity = Gravity.CENTER
+                  for (x in v) r.addView(x)
+                  return r
+              }
+
               override fun onCreate(s: Bundle?) {
                   super.onCreate(s)
                   ir = getSystemService(Context.CONSUMER_IR_SERVICE) as? ConsumerIrManager
+                  val bgColor = 0xFF14161B.toInt()
+                  window.statusBarColor = bgColor
 
-                  val root = LinearLayout(this).apply {
-                      orientation = LinearLayout.VERTICAL; setPadding(24, 48, 24, 24)
-                  }
-                  fun row(vararg b: Pair<String, Int>) {
-                      val r = LinearLayout(this).apply { gravity = Gravity.CENTER }
-                      for ((label, code) in b) {
-                          r.addView(Button(this).apply {
-                              text = label; textSize = 16f
-                              setOnClickListener { send(code) }
-                          }, LinearLayout.LayoutParams(0, 150, 1f))
-                      }
-                      root.addView(r)
-                  }
+                  val dark = 0xFF2A2D36.toInt()
+                  val arrow = 0xFF343944.toInt()
 
-                  row("⏻" to 12, "Kaynak" to 56, "Sessiz" to 13)
-                  row("Ana Sayfa" to 84, "Geri" to 10, "Bilgi" to 15)
-                  row("" to -1, "▲" to 88, "" to -1)
-                  row("◀" to 90, "OK" to 92, "▶" to 91)
-                  row("" to -1, "▼" to 89, "" to -1)
-                  row("Ses +" to 16, "Kanal +" to 32)
-                  row("Ses -" to 17, "Kanal -" to 33)
-                  row("1" to 1, "2" to 2, "3" to 3)
-                  row("4" to 4, "5" to 5, "6" to 6)
-                  row("7" to 7, "8" to 8, "9" to 9)
-                  row("" to -1, "0" to 0, "" to -1)
+                  val root = LinearLayout(this)
+                  root.orientation = LinearLayout.VERTICAL
+                  root.gravity = Gravity.CENTER_HORIZONTAL
+                  root.setBackgroundColor(bgColor)
+                  root.setPadding(dp(12), dp(24), dp(12), dp(24))
 
-                  setContentView(ScrollView(this).apply { addView(root) })
+                  root.addView(hrow(
+                      key("AÇ/KAPA", 12, 0xFFE53935.toInt(), 11f),
+                      key("KAYNAK", 56, dark, 11f),
+                      key("SESSİZ", 13, dark, 11f)))
+
+                  val atv = key("ANDROID TV", 84, 0xFF00897B.toInt(), 13f)
+                  atv.layoutParams = lp(220, 48, 6)
+                  root.addView(hrow(atv))
+
+                  val pad = LinearLayout(this)
+                  pad.orientation = LinearLayout.VERTICAL
+                  pad.gravity = Gravity.CENTER
+                  val pbg = GradientDrawable()
+                  pbg.setColor(0xFF1E2128.toInt())
+                  pbg.cornerRadius = dp(48).toFloat()
+                  pad.background = pbg
+                  pad.setPadding(dp(8), dp(8), dp(8), dp(8))
+                  pad.addView(hrow(sp(), key(two("▲", "YUKARI"), 88, arrow, 9f), sp()))
+                  pad.addView(hrow(key(two("◀", "SOL"), 90, arrow, 9f), key("OK", 92, 0xFF3F51B5.toInt()), key(two("▶", "SAĞ"), 91, arrow, 9f)))
+                  pad.addView(hrow(sp(), key(two("▼", "AŞAĞI"), 89, arrow, 9f), sp()))
+                  val padLp = LinearLayout.LayoutParams(
+                      LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                  padLp.setMargins(0, dp(16), 0, dp(16))
+                  root.addView(pad, padLp)
+
+                  root.addView(hrow(
+                      key("GERİ", 10, dark, 11f),
+                      key("ANA", 84, dark, 11f),
+                      key("BİLGİ", 15, dark, 11f)))
+
+                  root.addView(hrow(
+                      mk(two("◀◀", "GERİ"), 43), mk(two("▶", "OYNAT"), 44), mk(two("II", "DURAKLAT"), 48), mk(two("■", "DUR"), 49), mk(two("▶▶", "İLERİ"), 40)))
+
+                  val pills = hrow(pill("SES", 16, 17), pill("KANAL", 32, 33))
+                  pills.setPadding(0, dp(12), 0, dp(12))
+                  root.addView(pills)
+
+                  root.addView(hrow(key("1", 1, dark, 20f), key("2", 2, dark, 20f), key("3", 3, dark, 20f)))
+                  root.addView(hrow(key("4", 4, dark, 20f), key("5", 5, dark, 20f), key("6", 6, dark, 20f)))
+                  root.addView(hrow(key("7", 7, dark, 20f), key("8", 8, dark, 20f), key("9", 9, dark, 20f)))
+                  root.addView(hrow(key("0", 0, dark, 20f)))
+
+                  val scroll = ScrollView(this)
+                  scroll.setBackgroundColor(bgColor)
+                  scroll.isFillViewport = true
+                  scroll.addView(root)
+                  setContentView(scroll)
               }
           }
           EOF1
