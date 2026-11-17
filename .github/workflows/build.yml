@@ -1,0 +1,165 @@
+name: APK Derle
+on:
+  workflow_dispatch:
+  push:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.9
+      - name: Proje dosyalarini olustur
+        run: |
+          mkdir -p app/src/main/java/com/example/philipsremote
+          cat > settings.gradle.kts <<'EOF1'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositories { google(); mavenCentral() } }
+          rootProject.name = "PhilipsRemote"
+          include(":app")
+          EOF1
+          cat > build.gradle.kts <<'EOF1'
+          plugins {
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          EOF1
+          cat > gradle.properties <<'EOF1'
+          android.useAndroidX=true
+          org.gradle.jvmargs=-Xmx2g
+          EOF1
+          cat > app/build.gradle.kts <<'EOF1'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+          android {
+              namespace = "com.example.philipsremote"
+              compileSdk = 34
+              defaultConfig {
+                  applicationId = "com.example.philipsremote"
+                  minSdk = 26
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions { jvmTarget = "17" }
+          }
+          dependencies {
+              implementation("androidx.appcompat:appcompat:1.6.1")
+          }
+          EOF1
+          cat > app/src/main/AndroidManifest.xml <<'EOF1'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.TRANSMIT_IR"/>
+              <uses-permission android:name="android.permission.VIBRATE"/>
+              <uses-feature android:name="android.hardware.consumerir" android:required="false"/>
+              <application android:label="Philips Kumanda"
+                  android:theme="@style/Theme.AppCompat.Light.NoActionBar">
+                  <activity android:name=".MainActivity" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF1
+          cat > app/src/main/java/com/example/philipsremote/MainActivity.kt <<'EOF1'
+          package com.example.philipsremote
+
+          import android.content.Context
+          import android.hardware.ConsumerIrManager
+          import android.os.Bundle
+          import android.os.VibrationEffect
+          import android.os.Vibrator
+          import android.view.Gravity
+          import android.widget.*
+          import androidx.appcompat.app.AppCompatActivity
+
+          class MainActivity : AppCompatActivity() {
+
+              private var ir: ConsumerIrManager? = null
+              private var toggle = 0
+
+              // Philips RC6 mode 0, adres 0 (TV), 36 kHz
+              private val T = 444
+              private fun rc6(cmd: Int): IntArray {
+                  val h = ArrayList<Boolean>()
+                  repeat(6) { h.add(true) }; repeat(2) { h.add(false) } // leader
+                  h.add(true); h.add(false) // start biti
+                  repeat(3) { h.add(false); h.add(true) } // mod 000
+                  if (toggle == 0) { h.addAll(listOf(false, false, true, true)) }
+                  else { h.addAll(listOf(true, true, false, false)) } // toggle biti (2T)
+                  val bits = (0 shl 8) or cmd // adres 0 + komut
+                  for (i in 15 downTo 0) {
+                      if ((bits shr i) and 1 == 1) { h.add(true); h.add(false) }
+                      else { h.add(false); h.add(true) }
+                  }
+                  val out = ArrayList<Int>()
+                  var cur = h[0]; var n = 0
+                  for (x in h) { if (x == cur) n++ else { out.add(n * T); cur = x; n = 1 } }
+                  out.add(n * T)
+                  return out.toIntArray()
+              }
+
+              private fun send(cmd: Int) {
+                  val m = ir
+                  if (m == null || !m.hasIrEmitter()) {
+                      Toast.makeText(this, "Bu telefonda IR verici yok", Toast.LENGTH_SHORT).show(); return
+                  }
+                  m.transmit(36000, rc6(cmd))
+                  toggle = 1 - toggle
+                  (getSystemService(Context.VIBRATOR_SERVICE) as Vibrator)
+                      .vibrate(VibrationEffect.createOneShot(25, VibrationEffect.DEFAULT_AMPLITUDE))
+              }
+
+              override fun onCreate(s: Bundle?) {
+                  super.onCreate(s)
+                  ir = getSystemService(Context.CONSUMER_IR_SERVICE) as? ConsumerIrManager
+
+                  val root = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL; setPadding(24, 48, 24, 24)
+                  }
+                  fun row(vararg b: Pair<String, Int>) {
+                      val r = LinearLayout(this).apply { gravity = Gravity.CENTER }
+                      for ((label, code) in b) {
+                          r.addView(Button(this).apply {
+                              text = label; textSize = 16f
+                              setOnClickListener { send(code) }
+                          }, LinearLayout.LayoutParams(0, 150, 1f))
+                      }
+                      root.addView(r)
+                  }
+
+                  row("⏻" to 12, "Kaynak" to 56, "Sessiz" to 13)
+                  row("Ana Sayfa" to 84, "Geri" to 10, "Bilgi" to 15)
+                  row("" to -1, "▲" to 88, "" to -1)
+                  row("◀" to 90, "OK" to 92, "▶" to 91)
+                  row("" to -1, "▼" to 89, "" to -1)
+                  row("Ses +" to 16, "Kanal +" to 32)
+                  row("Ses -" to 17, "Kanal -" to 33)
+                  row("1" to 1, "2" to 2, "3" to 3)
+                  row("4" to 4, "5" to 5, "6" to 6)
+                  row("7" to 7, "8" to 8, "9" to 9)
+                  row("" to -1, "0" to 0, "" to -1)
+
+                  setContentView(ScrollView(this).apply { addView(root) })
+              }
+          }
+          EOF1
+      - name: Derle
+        run: gradle assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PhilipsKumanda-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
